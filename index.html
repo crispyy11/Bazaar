@@ -69,9 +69,9 @@ const short = n => Math.abs(n) >= 1e6 ? (n / 1e6).toFixed(2) + "m" : (n / 1e3).t
 function price(p, side) {
   if (!p) return null;
   // side "buy" = what you pay to instant-buy; "sell" = what you get to instant-sell
-  const list = side === "buy" ? p.sell_summary : p.buy_summary;
+  const list = side === "buy" ? p.buy_summary : p.sell_summary;
   if (list && list.length) return list[0].pricePerUnit;
-  return side === "buy" ? p.quick_status.buyPrice : p.quick_status.sellPrice;
+  return side === "buy" ? p.quick_status.sellPrice : p.quick_status.buyPrice;
 }
 
 async function refresh() {
