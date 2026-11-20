@@ -62,28 +62,29 @@ const PARTS = [
   ["SYNTHETIC_HEART", "Synthetic Heart"],
 ].map(([id, label]) => ({ id, label, side: "sell" }));
 
-const API = "https://api.hypixel.net/v2/skyblock/bazaar";
+const API = id => `https://sky.coflnet.com/api/bazaar/${id}/history/hour`;
 const fmt = n => Math.round(n).toLocaleString("en-US");
 const short = n => Math.abs(n) >= 1e6 ? (n / 1e6).toFixed(2) + "m" : (n / 1e3).toFixed(2) + "k";
 
-function price(p, side) {
-  if (!p) return null;
-  // side "buy" = what you pay to instant-buy; "sell" = what you get to instant-sell
-  const list = side === "buy" ? p.buy_summary : p.sell_summary;
-  if (list && list.length) return list[0].pricePerUnit;
-  return side === "buy" ? p.quick_status.sellPrice : p.quick_status.buyPrice;
+// The API returns the last hour of prices. Take the newest entry.
+// "buy" = instant-buy (the higher price), "sell" = instant-sell (the lower price).
+async function getLatest(item) {
+  const res = await fetch(API(item.id), { cache: "no-store" });
+  if (!res.ok) throw new Error(item.id + " returned " + res.status);
+  const list = await res.json();
+  if (!Array.isArray(list) || !list.length) throw new Error("No data for " + item.id);
+  const newest = list.reduce((a, b) => (new Date(b.timestamp) > new Date(a.timestamp) ? b : a));
+  return { value: newest[item.side], time: newest.timestamp };
 }
 
 async function refresh() {
   const err = document.getElementById("err"), status = document.getElementById("status");
   status.textContent = "Updating…";
   try {
-    const res = await fetch(API + "?t=" + Date.now(), { cache: "no-store" });
-    const data = await res.json();
-    if (!data.success) throw new Error("API said no");
     const items = [TARGET, ...PARTS];
-    const vals = items.map(i => ({ ...i, value: price(data.products[i.id], i.side) }));
-    if (vals.some(v => v.value == null)) throw new Error("Missing item: " + vals.find(v => v.value == null).id);
+    const got = await Promise.all(items.map(getLatest));
+    const vals = items.map((i, k) => ({ ...i, value: got[k].value }));
+    const latestTime = got.map(g => g.time).sort().pop();
 
     const apparatus = vals[0].value;
     const partsTotal = vals.slice(1).reduce((s, v) => s + v.value, 0);
@@ -102,8 +103,7 @@ async function refresh() {
       `<div class="row total"><span class="name">Components total</span><span class="kind"></span><span>${fmt(partsTotal)}</span></div>`;
 
     err.style.display = "none";
-    const lu = data.lastUpdated ? new Date(data.lastUpdated).toLocaleTimeString() : "?";
-    status.textContent = "Bazaar data from " + lu;
+    status.textContent = "Newest price: " + latestTime.replace("T", " ").slice(0, 19) + " (UTC)";
   } catch (e) {
     err.style.display = "block";
     err.textContent = "Couldn't load prices (" + e.message + "). Check your connection and press Refresh.";
