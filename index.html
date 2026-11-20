@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bazaar profit checker</title>
+<style>
+:root{--bg:#f3f5f4;--card:#fff;--ink:#16211d;--mute:#5d6b65;--line:#d9e0dc;--good:#0f7a4a;--bad:#b3261e;--accent:#0f5c5c}
+@media (prefers-color-scheme:dark){:root{--bg:#111816;--card:#18221f;--ink:#e6efeb;--mute:#93a39b;--line:#2b3a35;--good:#4fd38d;--bad:#ff8a80;--accent:#5cc8c8}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;padding:24px 16px}
+main{max-width:640px;margin:0 auto}
+h1{font-size:1.4rem;margin:0 0 4px}
+.sub{color:var(--mute);margin:0 0 20px;font-size:.9rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
+.result{text-align:center}
+.result .big{font-size:2.2rem;font-weight:700;margin:4px 0;font-variant-numeric:tabular-nums}
+.good{color:var(--good)}.bad{color:var(--bad)}
+.row{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
+.row:last-child{border-bottom:0}
+.row .name{flex:1}.row .kind{color:var(--mute);font-size:.85rem;width:90px}
+.row.total{font-weight:700}
+.bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+button{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:9px 16px;font:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+input{width:80px;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}
+.status{color:var(--mute);font-size:.85rem;margin-left:auto}
+#err{color:var(--bad);margin:0 0 12px;display:none}
+</style>
+</head>
+<body>
+<main>
+  <h1>Bazaar profit checker</h1>
+  <p class="sub">Precursor Apparatus instant-buy, minus the six components' instant-sell, times your crafts.</p>
+
+  <p id="err" role="alert"></p>
+
+  <div class="card result">
+    <div>Profit for <span id="n">64</span> crafts</div>
+    <div class="big" id="profit">…</div>
+    <div id="per" class="sub" style="margin:0"></div>
+  </div>
+
+  <div class="card" id="rows"></div>
+
+  <div class="bar">
+    <label>Crafts <input id="mult" type="number" min="1" value="64"></label>
+    <button id="go">Refresh now</button>
+    <span class="status" id="status">Loading…</span>
+  </div>
+</main>
+
+<script>
+// Instant-buy = lowest sell offer. Instant-sell = highest buy order.
+const TARGET = { id: "PRECURSOR_APPARATUS", label: "Precursor Apparatus", side: "buy" };
+const PARTS = [
+  ["CONTROL_SWITCH", "Control Switch"],
+  ["ELECTRON_TRANSMITTER", "Electron Transmitter"],
+  ["FTX_3070", "FTX 3070"],
+  ["ROBOTRON_REFLECTOR", "Robotron Reflector"],
+  ["SUPERLITE_MOTOR", "Superlite Motor"],
+  ["SYNTHETIC_HEART", "Synthetic Heart"],
+].map(([id, label]) => ({ id, label, side: "sell" }));
+
+const API = "https://api.hypixel.net/v2/skyblock/bazaar";
+const fmt = n => Math.round(n).toLocaleString("en-US");
+const short = n => Math.abs(n) >= 1e6 ? (n / 1e6).toFixed(2) + "m" : (n / 1e3).toFixed(2) + "k";
+
+function price(p, side) {
+  if (!p) return null;
+  // side "buy" = what you pay to instant-buy; "sell" = what you get to instant-sell
+  const list = side === "buy" ? p.sell_summary : p.buy_summary;
+  if (list && list.length) return list[0].pricePerUnit;
+  return side === "buy" ? p.quick_status.buyPrice : p.quick_status.sellPrice;
+}
+
+async function refresh() {
+  const err = document.getElementById("err"), status = document.getElementById("status");
+  status.textContent = "Updating…";
+  try {
+    const res = await fetch(API + "?t=" + Date.now(), { cache: "no-store" });
+    const data = await res.json();
+    if (!data.success) throw new Error("API said no");
+    const items = [TARGET, ...PARTS];
+    const vals = items.map(i => ({ ...i, value: price(data.products[i.id], i.side) }));
+    if (vals.some(v => v.value == null)) throw new Error("Missing item: " + vals.find(v => v.value == null).id);
+
+    const apparatus = vals[0].value;
+    const partsTotal = vals.slice(1).reduce((s, v) => s + v.value, 0);
+    const per = apparatus - partsTotal;
+    const mult = Math.max(1, +document.getElementById("mult").value || 64);
+    const profit = per * mult;
+
+    document.getElementById("n").textContent = mult;
+    const pe = document.getElementById("profit");
+    pe.textContent = (profit >= 0 ? "+" : "−") + fmt(Math.abs(profit)) + " coins";
+    pe.className = "big " + (profit >= 0 ? "good" : "bad");
+    document.getElementById("per").textContent = "Per craft: " + (per >= 0 ? "+" : "−") + short(Math.abs(per)) + " (" + short(apparatus) + " − " + short(partsTotal) + ")";
+
+    document.getElementById("rows").innerHTML =
+      vals.map(v => `<div class="row"><span class="name">${v.label}</span><span class="kind">${v.side === "buy" ? "instant-buy" : "instant-sell"}</span><span>${fmt(v.value)}</span></div>`).join("") +
+      `<div class="row total"><span class="name">Components total</span><span class="kind"></span><span>${fmt(partsTotal)}</span></div>`;
+
+    err.style.display = "none";
+    const lu = data.lastUpdated ? new Date(data.lastUpdated).toLocaleTimeString() : "?";
+    status.textContent = "Bazaar data from " + lu;
+  } catch (e) {
+    err.style.display = "block";
+    err.textContent = "Couldn't load prices (" + e.message + "). Check your connection and press Refresh.";
+    status.textContent = "Failed";
+  }
+}
+
+document.getElementById("go").onclick = refresh;
+document.getElementById("mult").onchange = refresh;
+refresh();
+setInterval(refresh, 30000);
+</script>
+</body>
+</html>
